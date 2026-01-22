@@ -1,231 +1,887 @@
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام إدارة شؤون العسكريين</title>
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <title>نظام وزارة الداخلية - LSPD</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Cairo', sans-serif; background-color: #0f172a; }
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body { 
+            font-family: 'Cairo', 'Segoe UI', sans-serif;
+            background: #0a0e27;
+            background-image: 
+                radial-gradient(at 20% 30%, rgba(30, 58, 138, 0.3) 0, transparent 50%),
+                radial-gradient(at 80% 70%, rgba(109, 40, 217, 0.2) 0, transparent 50%);
+            min-height: 100vh;
+        }
+        
         .glass-card {
-            background: rgba(30, 41, 59, 0.7);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(148, 163, 184, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        
+        .neon-border {
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.5),
+                        0 0 40px rgba(59, 130, 246, 0.3);
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .animate-fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .stat-card {
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
         }
     </style>
 </head>
 <body>
     <div id="root"></div>
-
+    
     <script type="text/babel">
         const { useState, useEffect } = React;
 
+        const DB_CONFIG = {
+            binId: '679002b0e41b4d34e46a68e1',
+            apiKey: '$2a$10$vKHNwL7LFu3g6jqPKdJxVu6YH8YkO0RTPj1kkqJnvKaLxJ.XqYDNi',
+            baseUrl: 'https://api.jsonbin.io/v3/b/'
+        };
+
         const PoliceSystem = () => {
-            // بيانات المستخدم الحالي (مثال لقائد)
-            const [currentUser, setCurrentUser] = useState({ id: "100", name: "القائد العام", role: "قائد" });
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [loginError, setLoginError] = useState('');
+            const [loginForm, setLoginForm] = useState({ id: '', password: '' });
+            const [currentPage, setCurrentPage] = useState('home');
+            const [loading, setLoading] = useState(true);
+            const [syncing, setSyncing] = useState(false);
             
-            // قائمة العساكر
-            const [users, setUsers] = useState([
-                { id: "2001", name: "أحمد محمد", password: "123", department: "العمليات", rank: "Captain", role: "ضابط" },
-                { id: "2002", name: "خالد علي", password: "456", department: "الدوريات", rank: "Officer I", role: "جندي" }
-            ]);
+            const [users, setUsers] = useState([{
+                id: '1001', password: 'commander', name: 'عبدالله محمد',
+                role: 'قائد', rank: 'General', department: 'القيادة العامة'
+            }]);
+            const [criminals, setCriminals] = useState([]);
+            const [reports, setReports] = useState([]);
+            const [announcements, setAnnouncements] = useState([]);
+            const [militaryPersonnel, setMilitaryPersonnel] = useState([{
+                id: 1, name: 'عبدالله محمد', rank: 'General',
+                unit: '1001', department: 'القيادة العامة'
+            }]);
+            
+            const [searchTerm, setSearchTerm] = useState('');
+            const [newCriminal, setNewCriminal] = useState({ name: '', crime: '', danger: 'متوسط' });
+            const [newUser, setNewUser] = useState({ id: '', password: '', name: '', role: 'جندي', rank: 'Cadet', department: '' });
+            const [newAnnouncement, setNewAnnouncement] = useState({ title: '', content: '' });
 
-            // حالة العسكري الجديد
-            const [newUser, setNewUser] = useState({
-                id: '',
-                name: '',
-                password: '',
-                department: '',
-                rank: 'Cadet',
-                role: 'جندي'
-            });
+            const loadFromCloud = async () => {
+                try {
+                    setLoading(true);
+                    const response = await fetch(`${DB_CONFIG.baseUrl}${DB_CONFIG.binId}/latest`, {
+                        headers: { 'X-Master-Key': DB_CONFIG.apiKey }
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        const cloudData = data.record;
+                        
+                        if (cloudData.users) setUsers(cloudData.users);
+                        if (cloudData.criminals) setCriminals(cloudData.criminals);
+                        if (cloudData.reports) setReports(cloudData.reports);
+                        if (cloudData.announcements) setAnnouncements(cloudData.announcements);
+                        if (cloudData.militaryPersonnel) setMilitaryPersonnel(cloudData.militaryPersonnel);
+                    }
+                } catch (error) {
+                    console.log('استخدام البيانات المحلية');
+                } finally {
+                    setLoading(false);
+                }
+            };
 
-            // دالة إضافة عسكري جديد
+            const saveToCloud = async () => {
+                try {
+                    setSyncing(true);
+                    const cloudData = {
+                        users, criminals, reports, announcements, militaryPersonnel,
+                        lastUpdate: new Date().toISOString()
+                    };
+                    
+                    await fetch(`${DB_CONFIG.baseUrl}${DB_CONFIG.binId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Master-Key': DB_CONFIG.apiKey
+                        },
+                        body: JSON.stringify(cloudData)
+                    });
+                } catch (error) {
+                    console.error('خطأ في الحفظ');
+                } finally {
+                    setSyncing(false);
+                }
+            };
+
+            useEffect(() => { loadFromCloud(); }, []);
+            useEffect(() => { if (!loading) saveToCloud(); }, [users, criminals, reports, announcements, militaryPersonnel]);
+
+            const hasPermission = (action) => {
+                if (!currentUser) return false;
+                const permissions = {
+                    'قائد': ['view', 'add', 'edit', 'delete', 'manage'],
+                    'ضابط': ['view', 'add', 'edit'],
+                    'جندي': ['view']
+                };
+                return permissions[currentUser.role]?.includes(action);
+            };
+
+            const handleLogin = () => {
+                const user = users.find(u => u.id === loginForm.id && u.password === loginForm.password);
+                if (user) {
+                    setCurrentUser(user);
+                    setIsLoggedIn(true);
+                    setLoginError('');
+                } else {
+                    setLoginError('❌ بيانات الدخول غير صحيحة');
+                }
+            };
+
+            const addCriminal = () => {
+                if (!hasPermission('add')) return alert('⚠️ ليس لديك صلاحية');
+                if (newCriminal.name && newCriminal.crime) {
+                    setCriminals([...criminals, {
+                        id: Date.now(),
+                        ...newCriminal,
+                        status: 'مطلوب',
+                        date: new Date().toISOString().split('T')[0]
+                    }]);
+                    setNewCriminal({ name: '', crime: '', danger: 'متوسط' });
+                    alert('✅ تم إضافة المجرم بنجاح!');
+                }
+            };
+
+            const deleteCriminal = (id) => {
+                if (!hasPermission('delete')) return alert('⚠️ ليس لديك صلاحية');
+                if (confirm('هل أنت متأكد من حذف هذا المجرم؟')) {
+                    setCriminals(criminals.filter(c => c.id !== id));
+                }
+            };
+
             const addUser = () => {
-                if (!newUser.id || !newUser.name || !newUser.password) {
-                    alert("⚠️ يرجى إدخال جميع البيانات الأساسية (اليونت، الاسم، كلمة المرور)");
-                    return;
+                if (!hasPermission('manage')) return alert('⚠️ للقائد فقط');
+                if (!newUser.id || !newUser.password || !newUser.name || !newUser.department) {
+                    return alert('⚠️ الرجاء تعبئة جميع الحقول');
+                }
+                if (users.find(u => u.id === newUser.id)) {
+                    return alert('⚠️ الرقم موجود مسبقاً!');
                 }
                 
-                if (users.find(u => u.id === newUser.id)) {
-                    alert("❌ هذا اليونت موجود مسبقاً!");
-                    return;
-                }
-
                 setUsers([...users, newUser]);
-                setNewUser({ id: '', name: '', password: '', department: '', rank: 'Cadet', role: 'جندي' });
-                alert("✅ تم إضافة العسكري بنجاح");
+                setMilitaryPersonnel([...militaryPersonnel, {
+                    id: Date.now(),
+                    name: newUser.name,
+                    rank: newUser.rank,
+                    unit: newUser.id,
+                    department: newUser.department
+                }]);
+                
+                setNewUser({ id: '', password: '', name: '', role: 'جندي', rank: 'Cadet', department: '' });
+                alert('✅ تم إضافة العسكري بنجاح!');
             };
 
-            // دالة حذف عسكري
-            const deleteUser = (id) => {
-                if (confirm("هل أنت متأكد من حذف هذا العسكري؟")) {
-                    setUsers(users.filter(u => u.id !== id));
+            const deleteUser = (userId) => {
+                if (!hasPermission('manage')) return alert('⚠️ للقائد فقط');
+                if (userId === currentUser.id) return alert('⚠️ لا يمكنك حذف حسابك!');
+                
+                if (confirm('هل أنت متأكد من حذف هذا العسكري؟')) {
+                    setUsers(users.filter(u => u.id !== userId));
+                    setMilitaryPersonnel(militaryPersonnel.filter(m => m.unit !== userId));
                 }
             };
 
-            return (
-                <div className="min-h-screen p-4 md:p-8 text-white">
-                    <div className="max-w-6xl mx-auto">
-                        <header className="mb-10 flex justify-between items-center">
-                            <div>
-                                <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
-                                    نظام إدارة القوة 🛡️
-                                </h1>
-                                <p className="text-gray-400 mt-2">مرحباً بك سيادة {currentUser.name}</p>
-                            </div>
-                        </header>
+            const addAnnouncement = () => {
+                if (!hasPermission('manage')) return alert('⚠️ للقائد فقط');
+                if (!newAnnouncement.title || !newAnnouncement.content) {
+                    return alert('⚠️ الرجاء تعبئة جميع الحقول');
+                }
+                
+                setAnnouncements([...announcements, {
+                    id: Date.now(),
+                    ...newAnnouncement,
+                    author: currentUser.name,
+                    date: new Date().toISOString().split('T')[0],
+                    time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })
+                }]);
+                setNewAnnouncement({ title: '', content: '' });
+                alert('✅ تم نشر البيان بنجاح!');
+            };
 
-                        {/* قسم إضافة عسكري جديد (يظهر للقادة فقط) */}
-                        {currentUser.role === 'قائد' && (
-                            <div className="glass-card p-8 rounded-2xl mb-12 shadow-2xl">
-                                <h3 className="text-2xl font-bold mb-6 flex items-center gap-2">
-                                    👤 إضافة عسكري جديد إلى القوة
-                                </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    <div>
-                                        <label className="block text-gray-300 mb-2 font-bold">الاسم الرباعي</label>
-                                        <input
-                                            type="text"
-                                            placeholder="اسم العسكري"
-                                            value={newUser.name}
-                                            onChange={(e) => setNewUser({...newUser, name: e.target.value})}
-                                            className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2 font-bold">اليونت (ID)</label>
-                                        <input
-                                            type="text"
-                                            placeholder="مثال: 2001"
-                                            value={newUser.id}
-                                            onChange={(e) => setNewUser({...newUser, id: e.target.value})}
-                                            className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2 font-bold">كلمة المرور</label>
-                                        <input
-                                            type="password"
-                                            placeholder="••••••••"
-                                            value={newUser.password}
-                                            onChange={(e) => setNewUser({...newUser, password: e.target.value})}
-                                            className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2 font-bold">القسم</label>
-                                        <input
-                                            type="text"
-                                            placeholder="مثال: العمليات"
-                                            value={newUser.department}
-                                            onChange={(e) => setNewUser({...newUser, department: e.target.value})}
-                                            className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2 font-bold">الرتبة</label>
-                                        <select
-                                            value={newUser.rank}
-                                            onChange={(e) => setNewUser({...newUser, rank: e.target.value})}
-                                            className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
-                                        >
-                                            <option value="Cadet">Cadet</option>
-                                            <option value="Solo Cadet">Solo Cadet</option>
-                                            <option value="Officer">Officer</option>
-                                            <option value="Officer I">Officer I</option>
-                                            <option value="Officer II">Officer II</option>
-                                            <option value="Officer III">Officer III</option>
-                                            <option value="Senior Officer">Senior Officer</option>
-                                            <option value="Sergeant">Sergeant</option>
-                                            <option value="First Sergeant">First Sergeant</option>
-                                            <option value="Captain">Captain</option>
-                                            <option value="Major">Major</option>
-                                            <option value="General">General</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-gray-300 mb-2 font-bold">الصلاحية</label>
-                                        <select
-                                            value={newUser.role}
-                                            onChange={(e) => setNewUser({...newUser, role: e.target.value})}
-                                            className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
-                                        >
-                                            <option value="جندي">فرد (مشاهدة فقط)</option>
-                                            <option value="ضابط">ضابط (إضافة وتعديل)</option>
-                                            <option value="قائد">قائد (كل الصلاحيات)</option>
-                                        </select>
-                                    </div>
+            const filteredCriminals = criminals.filter(c => 
+                c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                c.crime.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                            <h2 className="text-2xl font-bold text-white">جاري التحميل...</h2>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (!isLoggedIn) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-4">
+                        <div className="glass-card neon-border rounded-2xl p-8 w-full max-w-md animate-fade-in">
+                            <div className="text-center mb-8">
+                                <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mx-auto mb-4 flex items-center justify-center text-5xl">
+                                    👮
                                 </div>
-                                <button
-                                    onClick={addUser}
-                                    className="mt-8 w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-bold text-lg hover:from-green-500 hover:to-emerald-500 transition shadow-lg shadow-green-900/20"
+                                <h1 className="text-4xl font-black gradient-text mb-2">LSPD</h1>
+                                <p className="text-gray-400">نظام وزارة الداخلية</p>
+                            </div>
+                            
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-gray-300 mb-2 font-semibold">🆔 اليونت</label>
+                                    <input 
+                                        type="text" 
+                                        value={loginForm.id}
+                                        onChange={(e) => setLoginForm({...loginForm, id: e.target.value})}
+                                        className="w-full px-4 py-3 bg-slate-800/50 border-2 border-slate-700 rounded-xl text-white focus:border-blue-500 focus:outline-none transition"
+                                        placeholder="أدخل اليونت"
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-gray-300 mb-2 font-semibold">🔑 كلمة المرور</label>
+                                    <input 
+                                        type="password" 
+                                        value={loginForm.password}
+                                        onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+                                        onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                                        className="w-full px-4 py-3 bg-slate-800/50 border-2 border-slate-700 rounded-xl text-white focus:border-blue-500 focus:outline-none transition"
+                                        placeholder="أدخل كلمة المرور"
+                                    />
+                                </div>
+
+                                {loginError && (
+                                    <div className="bg-red-900/30 border-2 border-red-500 text-red-300 px-4 py-3 rounded-xl text-center font-bold">
+                                        {loginError}
+                                    </div>
+                                )}
+                                
+                                <button 
+                                    onClick={handleLogin}
+                                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-xl font-bold text-lg hover:from-blue-500 hover:to-purple-500 transition transform hover:scale-105"
                                 >
-                                    ✅ إضافة العسكري للقاعدة
+                                    🚀 دخول
                                 </button>
                             </div>
-                        )}
+                        </div>
+                    </div>
+                );
+            }
 
-                        {/* قائمة العساكر */}
-                        <div>
-                            <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
-                                📋 قائمة القوة الحالية <span className="text-sm bg-slate-700 px-3 py-1 rounded-full">{users.length}</span>
-                            </h3>
-                            <div className="grid grid-cols-1 gap-4">
-                                {users.map(user => (
-                                    <div key={user.id} className="glass-card p-6 rounded-xl border border-slate-700 hover:border-blue-500/50 transition duration-300">
-                                        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                                            <div className="flex items-center gap-4 flex-1 w-full">
-                                                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-2xl font-black text-white shadow-lg">
-                                                    {user.name.charAt(0)}
-                                                </div>
-                                                <div className="flex-1">
-                                                    <h4 className="text-xl font-bold text-white mb-1">{user.name}</h4>
-                                                    <div className="flex items-center gap-3 flex-wrap">
-                                                        <span className="bg-yellow-600/20 text-yellow-500 border border-yellow-600/30 px-3 py-1 rounded-full text-xs font-bold">
-                                                            ⭐ {user.rank}
-                                                        </span>
-                                                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                                                            user.role === 'قائد' ? 'bg-red-600/20 text-red-500 border border-red-600/30' :
-                                                            user.role === 'ضابط' ? 'bg-blue-600/20 text-blue-500 border border-blue-600/30' :
-                                                            'bg-green-600/20 text-green-500 border border-green-600/30'
-                                                        }`}>
-                                                            {user.role}
-                                                        </span>
-                                                    </div>
-                                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-3 text-sm text-gray-400">
-                                                        <p>🆔 اليونت: <span className="text-white font-bold">{user.id}</span></p>
-                                                        <p>🔑 الباسورد: <span className="text-white font-bold">{user.password}</span></p>
-                                                        <p>📍 القسم: <span className="text-white font-bold">{user.department || 'غير محدد'}</span></p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            {/* زر الحذف يظهر فقط إذا لم يكن المستخدم هو نفسه */}
-                                            {currentUser.role === 'قائد' && user.id !== currentUser.id && (
-                                                <button
-                                                    onClick={() => deleteUser(user.id)}
-                                                    className="w-full md:w-auto bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white border border-red-600/50 px-6 py-2 rounded-lg font-bold transition duration-300"
-                                                >
-                                                    🗑️ حذف
-                                                </button>
-                                            )}
-                                        </div>
+            return (
+                <div className="min-h-screen">
+                    {syncing && (
+                        <div className="fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-xl shadow-2xl z-50 flex items-center gap-2 animate-fade-in">
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <span className="font-bold">جاري الحفظ...</span>
+                        </div>
+                    )}
+                    
+                    {/* Header */}
+                    <header className="glass-card border-b border-slate-700 sticky top-0 z-40">
+                        <div className="container mx-auto px-4 py-4">
+                            <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center text-3xl">
+                                        👮
                                     </div>
+                                    <div>
+                                        <h1 className="text-2xl font-black gradient-text">LSPD</h1>
+                                        <p className="text-gray-400 text-sm">نظام وزارة الداخلية</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-4">
+                                    <div className="glass-card px-4 py-2 rounded-xl border border-slate-700">
+                                        <p className="text-white font-bold">{currentUser.name}</p>
+                                        <p className="text-gray-400 text-sm">{currentUser.rank} • {currentUser.role}</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => {
+                                            setIsLoggedIn(false);
+                                            setCurrentUser(null);
+                                            setCurrentPage('home');
+                                        }}
+                                        className="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-xl text-white font-bold transition"
+                                    >
+                                        🚪 خروج
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Navigation */}
+                    <nav className="glass-card border-b border-slate-700">
+                        <div className="container mx-auto px-4">
+                            <div className="flex gap-2 overflow-x-auto py-4">
+                                {[
+                                    { id: 'home', label: '🏠 الرئيسية', show: true },
+                                    { id: 'criminals', label: '👤 المطلوبين', show: true },
+                                    { id: 'reports', label: '📋 البلاغات', show: true },
+                                    { id: 'announcements', label: '📢 البيانات', show: true },
+                                    { id: 'military', label: '⭐ العساكر', show: true },
+                                    { id: 'manage', label: '⚙️ إدارة العساكر', show: hasPermission('manage') }
+                                ].filter(item => item.show).map(item => (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => setCurrentPage(item.id)}
+                                        className={`px-6 py-3 rounded-xl font-bold whitespace-nowrap transition ${
+                                            currentPage === item.id
+                                                ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                                                : 'glass-card text-gray-300 hover:text-white'
+                                        }`}
+                                    >
+                                        {item.label}
+                                    </button>
                                 ))}
                             </div>
                         </div>
+                    </nav>
+
+                    {/* Content */}
+                    <div className="container mx-auto px-4 py-8">
+                        {/* الصفحة الأولى - الرئيسية */}
+                        {currentPage === 'home' && (
+                            <div className="space-y-8 animate-fade-in">
+                                <div className="glass-card rounded-2xl p-8 border border-slate-700">
+                                    <h2 className="text-3xl font-black gradient-text mb-4">نبذة عامة</h2>
+                                    <p className="text-gray-300 text-lg leading-relaxed">
+                                        نظام إدارة شامل لوزارة الداخلية يوفر أدوات متقدمة لإدارة العمليات الأمنية والإدارية.
+                                        يتيح النظام تتبع المطلوبين، إدارة البلاغات، نشر البيانات الرسمية، وإدارة شؤون العساكر بكفاءة عالية.
+                                    </p>
+                                </div>
+
+                                {/* الإحصائيات */}
+                                <div className="grid md:grid-cols-3 gap-6">
+                                    <div className="glass-card rounded-2xl p-6 border border-slate-700 stat-card">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="w-12 h-12 bg-red-600/20 rounded-xl flex items-center justify-center text-2xl">
+                                                ⚠️
+                                            </div>
+                                            <span className="text-4xl font-black text-red-400">{criminals.length}</span>
+                                        </div>
+                                        <h3 className="text-xl font-bold text-white">مجرمين مطلوبين</h3>
+                                        <p className="text-gray-400 text-sm">حالات نشطة</p>
+                                    </div>
+
+                                    <div className="glass-card rounded-2xl p-6 border border-slate-700 stat-card">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="w-12 h-12 bg-blue-600/20 rounded-xl flex items-center justify-center text-2xl">
+                                                📋
+                                            </div>
+                                            <span className="text-4xl font-black text-blue-400">{reports.length}</span>
+                                        </div>
+                                        <h3 className="text-xl font-bold text-white">البلاغات</h3>
+                                        <p className="text-gray-400 text-sm">بلاغات مسجلة</p>
+                                    </div>
+
+                                    <div className="glass-card rounded-2xl p-6 border border-slate-700 stat-card">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <div className="w-12 h-12 bg-green-600/20 rounded-xl flex items-center justify-center text-2xl">
+                                                ⭐
+                                            </div>
+                                            <span className="text-4xl font-black text-green-400">{militaryPersonnel.length}</span>
+                                        </div>
+                                        <h3 className="text-xl font-bold text-white">العساكر</h3>
+                                        <p className="text-gray-400 text-sm">أفراد نشطون</p>
+                                    </div>
+                                </div>
+
+                                {/* آخر البلاغات */}
+                                {reports.length > 0 && (
+                                    <div className="glass-card rounded-2xl p-6 border border-slate-700">
+                                        <h3 className="text-2xl font-black text-white mb-6">📋 آخر البلاغات</h3>
+                                        <div className="space-y-4">
+                                            {reports.slice(-3).reverse().map(report => (
+                                                <div key={report.id} className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 hover:border-blue-600 transition">
+                                                    <div className="flex justify-between items-start">
+                                                        <div>
+                                                            <h4 className="text-white font-bold text-lg">{report.type}</h4>
+                                                            <p className="text-gray-400 text-sm">{report.location}</p>
+                                                        </div>
+                                                        <span className="bg-yellow-600 text-white px-3 py-1 rounded-full text-xs font-bold">
+                                                            {report.status}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* آخر البيانات */}
+                                {announcements.length > 0 && (
+                                    <div className="glass-card rounded-2xl p-6 border border-slate-700">
+                                        <h3 className="text-2xl font-black text-white mb-6">📢 آخر البيانات</h3>
+                                        <div className="space-y-4">
+                                            {announcements.slice(-2).reverse().map(ann => (
+                                                <div key={ann.id} className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 p-6 rounded-xl border border-purple-600/50">
+                                                    <h4 className="text-white font-bold text-xl mb-2">{ann.title}</h4>
+                                                    <p className="text-gray-300 mb-4 leading-relaxed">{ann.content}</p>
+                                                    <div className="flex justify-between items-center text-sm text-gray-400">
+                                                        <span>📝 {ann.author}</span>
+                                                        <span>🕐 {ann.date} - {ann.time}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* الصفحة الثانية - المطلوبين */}
+                        {currentPage === 'criminals' && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="glass-card rounded-2xl p-6 border border-slate-700">
+                                    <h2 className="text-3xl font-black gradient-text mb-6">👤 قائمة المطلوبين</h2>
+                                    
+                                    {/* البحث */}
+                                    <div className="mb-6">
+                                        <input
+                                            type="text"
+                                            placeholder="🔍 بحث عن مجرم..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            className="w-full px-6 py-4 bg-slate-800/50 border-2 border-slate-700 rounded-xl text-white focus:border-blue-500 focus:outline-none transition"
+                                        />
+                                    </div>
+
+                                    {/* نموذج الإضافة */}
+                                    {(hasPermission('add') || hasPermission('manage')) && (
+                                        <div className="bg-gradient-to-r from-blue-900/30 to-purple-900/30 p-6 rounded-xl border border-blue-600/50 mb-6">
+                                            <h3 className="text-xl font-bold text-white mb-4">➕ إضافة مجرم جديد</h3>
+                                            <div className="grid md:grid-cols-3 gap-4">
+                                                <input
+                                                    type="text"
+                                                    placeholder="الاسم الكامل"
+                                                    value={newCriminal.name}
+                                                    onChange={(e) => setNewCriminal({...newCriminal, name: e.target.value})}
+                                                    className="px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-blue-500 focus:outline-none"
+                                                />
+                                                <input
+                                                    type="text"
+                                                    placeholder="نوع الجريمة"
+                                                    value={newCriminal.crime}
+                                                    onChange={(e) => setNewCriminal({...newCriminal, crime: e.target.value})}
+                                                    className="px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-blue-500 focus:outline-none"
+                                                />
+                                                <select
+                                                    value={newCriminal.danger}
+                                                    onChange={(e) => setNewCriminal({...newCriminal, danger: e.target.value})}
+                                                    className="px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-blue-500 focus:outline-none"
+                                                >
+                                                    <option value="منخفض">منخفض</option>
+                                                    <option value="متوسط">متوسط</option>
+                                                    <option value="عالي">عالي</option>
+                                                </select>
+                                            </div>
+                                            <button
+                                                onClick={addCriminal}
+                                                className="mt-4 w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 rounded-xl font-bold hover:from-green-500 hover:to-emerald-500 transition"
+                                            >
+                                                ✅ إضافة
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* قائمة المجرمين */}
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                        {filteredCriminals.length === 0 ? (
+                                            <div className="col-span-2 text-center py-12">
+                                                <div className="text-6xl mb-4">👤</div>
+                                                <p className="text-gray-400 text-xl">لا يوجد مجرمين مطلوبين</p>
+                                            </div>
+                                        ) : (
+                                            filteredCriminals.map(criminal => (
+                                                <div key={criminal.id} className="bg-slate-800/50 p-6 rounded-xl border-r-4 border-red-600 hover:bg-slate-800 transition">
+                                                    <div className="flex justify-between items-start mb-3">
+                                                        <div className="flex-1">
+                                                            <h3 className="text-2xl font-bold text-white mb-2">{criminal.name}</h3>
+                                                            <p className="text-gray-400">🔴 {criminal.crime}</p>
+                                                        </div>
+                                                        <span className={`px-4 py-2 rounded-xl text-sm font-bold ${
+                                                            criminal.danger === 'عالي' ? 'bg-red-600 text-white' :
+                                                            criminal.danger === 'متوسط' ? 'bg-yellow-600 text-white' :
+                                                            'bg-blue-600 text-white'
+                                                        }`}>
+                                                            {criminal.danger}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="text-gray-500 text-sm">📅 {criminal.date}</span>
+                                                        {(hasPermission('delete') || hasPermission('manage')) && (
+                                                            <button
+                                                                onClick={() => deleteCriminal(criminal.id)}
+                                                                className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-white font-bold transition"
+                                                            >
+                                                                🗑️ حذف
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* الصفحة الثالثة - البلاغات */}
+                        {currentPage === 'reports' && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="glass-card rounded-2xl p-6 border border-slate-700">
+                                    <h2 className="text-3xl font-black gradient-text mb-6">📋 البلاغات</h2>
+                                    
+                                    {(hasPermission('add') || hasPermission('manage')) && (
+                                        <div className="bg-gradient-to-r from-blue-900/30 to-purple-900/30 p-6 rounded-xl border border-blue-600/50 mb-6">
+                                            <h3 className="text-xl font-bold text-white mb-4">➕ إضافة بلاغ جديد</h3>
+                                            <button
+                                                onClick={() => {
+                                                    const type = prompt('نوع البلاغ:');
+                                                    const location = prompt('الموقع:');
+                                                    const time = prompt('الوقت:');
+                                                    const date = prompt('التاريخ:');
+                                                    if (type && location && time && date) {
+                                                        setReports([...reports, { 
+                                                            id: Date.now(), 
+                                                            type, 
+                                                            location, 
+                                                            time, 
+                                                            date, 
+                                                            status: 'جديد' 
+                                                        }]);
+                                                        alert('✅ تم إضافة البلاغ!');
+                                                    }
+                                                }}
+                                                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 rounded-xl font-bold hover:from-green-500 hover:to-emerald-500 transition"
+                                            >
+                                                ✅ إضافة بلاغ
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-4">
+                                        {reports.length === 0 ? (
+                                            <div className="text-center py-12">
+                                                <div className="text-6xl mb-4">📋</div>
+                                                <p className="text-gray-400 text-xl">لا توجد بلاغات</p>
+                                            </div>
+                                        ) : (
+                                            reports.map(report => (
+                                                <div key={report.id} className="bg-slate-800/50 p-6 rounded-xl border-l-4 border-yellow-600 hover:bg-slate-800 transition">
+                                                    <div className="flex justify-between items-start">
+                                                        <div className="flex-1">
+                                                            <h3 className="text-xl font-bold text-white mb-2">{report.type}</h3>
+                                                            <p className="text-gray-400 mb-2">📍 {report.location}</p>
+                                                            <p className="text-gray-500 text-sm">🕐 {report.time} - {report.date}</p>
+                                                        </div>
+                                                        <span className="bg-yellow-600 text-white px-4 py-2 rounded-xl font-bold">
+                                                            {report.status}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* البيانات */}
+                        {currentPage === 'announcements' && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="glass-card rounded-2xl p-6 border border-slate-700">
+                                    <h2 className="text-3xl font-black gradient-text mb-6">📢 البيانات الرسمية</h2>
+                                    
+                                    {hasPermission('manage') && (
+                                        <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 p-6 rounded-xl border border-purple-600/50 mb-6">
+                                            <h3 className="text-xl font-bold text-white mb-4">➕ نشر بيان جديد</h3>
+                                            <div className="space-y-4">
+                                                <input
+                                                    type="text"
+                                                    placeholder="عنوان البيان"
+                                                    value={newAnnouncement.title}
+                                                    onChange={(e) => setNewAnnouncement({...newAnnouncement, title: e.target.value})}
+                                                    className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
+                                                />
+                                                <textarea
+                                                    placeholder="محتوى البيان..."
+                                                    value={newAnnouncement.content}
+                                                    onChange={(e) => setNewAnnouncement({...newAnnouncement, content: e.target.value})}
+                                                    rows="4"
+                                                    className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none resize-none"
+                                                />
+                                                <button
+                                                    onClick={addAnnouncement}
+                                                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-xl font-bold hover:from-purple-500 hover:to-pink-500 transition"
+                                                >
+                                                    📢 نشر البيان
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-4">
+                                        {announcements.length === 0 ? (
+                                            <div className="text-center py-12">
+                                                <div className="text-6xl mb-4">📢</div>
+                                                <p className="text-gray-400 text-xl">لا توجد بيانات</p>
+                                            </div>
+                                        ) : (
+                                            announcements.map(ann => (
+                                                <div key={ann.id} className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 p-6 rounded-xl border border-purple-600/50">
+                                                    <h3 className="text-2xl font-bold text-white mb-3">{ann.title}</h3>
+                                                    <p className="text-gray-300 mb-4 leading-relaxed text-lg">{ann.content}</p>
+                                                    <div className="flex justify-between items-center border-t border-purple-600/30 pt-4">
+                                                        <span className="text-gray-400">👤 {ann.author}</span>
+                                                        <span className="text-gray-400">🕐 {ann.date} - {ann.time}</span>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* الصفحة الرابعة - قائمة العساكر */}
+                        {currentPage === 'military' && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="glass-card rounded-2xl p-6 border border-slate-700">
+                                    <h2 className="text-3xl font-black gradient-text mb-6">⭐ قائمة العساكر</h2>
+                                    
+                                    <div className="grid md:grid-cols-3 gap-4">
+                                        {militaryPersonnel.length === 0 ? (
+                                            <div className="col-span-3 text-center py-12">
+                                                <div className="text-6xl mb-4">⭐</div>
+                                                <p className="text-gray-400 text-xl">لا يوجد عساكر</p>
+                                            </div>
+                                        ) : (
+                                            militaryPersonnel.map(person => (
+                                                <div key={person.id} className="glass-card p-6 rounded-xl border border-slate-700 hover:border-blue-600 transition">
+                                                    <div className="text-center mb-4">
+                                                        <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mx-auto mb-3 flex items-center justify-center text-3xl font-black text-white">
+                                                            {person.name.charAt(0)}
+                                                        </div>
+                                                        <h3 className="text-xl font-bold text-white mb-1">{person.name}</h3>
+                                                        <span className="inline-block bg-yellow-600 text-white px-3 py-1 rounded-full text-sm font-bold">
+                                                            ⭐ {person.rank}
+                                                        </span>
+                                                    </div>
+                                                    <div className="space-y-2 text-sm">
+                                                        <div className="bg-slate-800/50 p-3 rounded-lg">
+                                                            <p className="text-gray-400 mb-1">القسم</p>
+                                                            <p className="text-white font-bold">{person.department}</p>
+                                                        </div>
+                                                        <div className="bg-slate-800/50 p-3 rounded-lg">
+                                                            <p className="text-gray-400 mb-1">اليونت</p>
+                                                            <p className="text-blue-400 font-bold">{person.unit}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* الصفحة الخامسة - إدارة العساكر (للقائد فقط) */}
+                        {currentPage === 'manage' && hasPermission('manage') && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="glass-card rounded-2xl p-6 border border-slate-700">
+                                    <h2 className="text-3xl font-black gradient-text mb-6">⚙️ إدارة العساكر</h2>
+                                    
+                                    {/* نموذج إضافة عسكري */}
+                                    <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 p-6 rounded-xl border border-purple-600/50 mb-6">
+                                        <h3 className="text-xl font-bold text-white mb-4">➕ إضافة عسكري جديد</h3>
+                                        <div className="grid md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-gray-300 mb-2 font-bold">الاسم الكامل</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="مثال: أحمد محمد"
+                                                    value={newUser.name}
+                                                    onChange={(e) => setNewUser({...newUser, name: e.target.value})}
+                                                    className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-gray-300 mb-2 font-bold">اليونت</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="مثال: 2001"
+                                                    value={newUser.id}
+                                                    onChange={(e) => setNewUser({...newUser, id: e.target.value})}
+                                                    className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-gray-300 mb-2 font-bold">كلمة المرور</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="مثال: password123"
+                                                    value={newUser.password}
+                                                    onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                                                    className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-gray-300 mb-2 font-bold">القسم</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="مثال: العمليات"
+                                                    value={newUser.department}
+                                                    onChange={(e) => setNewUser({...newUser, department: e.target.value})}
+                                                    className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-gray-300 mb-2 font-bold">الرتبة</label>
+                                                <select
+                                                    value={newUser.rank}
+                                                    onChange={(e) => setNewUser({...newUser, rank: e.target.value})}
+                                                    className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
+                                                >
+                                                    <option value="Cadet">Cadet</option>
+                                                    <option value="Solo Cadet">Solo Cadet</option>
+                                                    <option value="Officer">Officer</option>
+                                                    <option value="Officer I">Officer I</option>
+                                                    <option value="Officer II">Officer II</option>
+                                                    <option value="Officer III">Officer III</option>
+                                                    <option value="Senior Officer">Senior Officer</option>
+                                                    <option value="Sergeant">Sergeant</option>
+                                                    <option value="First Sergeant">First Sergeant</option>
+                                                    <option value="Staff Sergeant">Staff Sergeant</option>
+                                                    <option value="Lieutenant">Lieutenant</option>
+                                                    <option value="First Lieutenant">First Lieutenant</option>
+                                                    <option value="Captain">Captain</option>
+                                                    <option value="Major">Major</option>
+                                                    <option value="Colonel">Colonel</option>
+                                                    <option value="Brigadier General">Brigadier General</option>
+                                                    <option value="Major General">Major General</option>
+                                                    <option value="Lieutenant General">Lieutenant General</option>
+                                                    <option value="General">General</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-gray-300 mb-2 font-bold">الصلاحية</label>
+                                                <select
+                                                    value={newUser.role}
+                                                    onChange={(e) => setNewUser({...newUser, role: e.target.value})}
+                                                    className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:border-purple-500 focus:outline-none"
+                                                >
+                                                    <option value="جندي">فرد (مشاهدة فقط)</option>
+                                                    <option value="ضابط">ضابط (إضافة وتعديل)</option>
+                                                    <option value="قائد">قائد (كل الصلاحيات)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={addUser}
+                                            className="mt-4 w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-bold text-lg hover:from-green-500 hover:to-emerald-500 transition"
+                                        >
+                                            ✅ إضافة العسكري
+                                        </button>
+                                    </div>
+
+                                    {/* قائمة العساكر مع إمكانية الحذف */}
+                                    <div>
+                                        <h3 className="text-2xl font-bold text-white mb-4">📋 قائمة العساكر الحالية</h3>
+                                        <div className="space-y-4">
+                                            {users.map(user => (
+                                                <div key={user.id} className="glass-card p-6 rounded-xl border border-slate-700">
+                                                    <div className="flex justify-between items-start">
+                                                        <div className="flex items-center gap-4 flex-1">
+                                                            <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-2xl font-black text-white">
+                                                                {user.name.charAt(0)}
+                                                            </div>
+                                                            <div className="flex-1">
+                                                                <h4 className="text-xl font-bold text-white mb-1">{user.name}</h4>
+                                                                <div className="flex items-center gap-3 flex-wrap">
+                                                                    <span className="bg-yellow-600 text-white px-3 py-1 rounded-full text-sm font-bold">
+                                                                        ⭐ {user.rank}
+                                                                    </span>
+                                                                    <span className={`px-3 py-1 rounded-full text-sm font-bold ${
+                                                                        user.role === 'قائد' ? 'bg-red-600 text-white' :
+                                                                        user.role === 'ضابط' ? 'bg-blue-600 text-white' :
+                                                                        'bg-green-600 text-white'
+                                                                    }`}>
+                                                                        {user.role}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="grid md:grid-cols-3 gap-3 mt-2 text-sm text-gray-400">
+                                                                    <p>🆔 اليونت: <span className="text-white font-bold">{user.id}</span></p>
+                                                                    <p>🔑 الباسورد: <span className="text-white font-bold">{user.password}</span></p>
+                                                                    <p>📍 القسم: <span className="text-white font-bold">{user.department}</span></p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {user.id !== currentUser.id && (
+                                                            <button
+                                                                onClick={() => deleteUser(user.id)}
+                                                                className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-white font-bold transition"
+                                                            >
+                                                                🗑️ حذف
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             );
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<PoliceSystem />);
+        ReactDOM.render(<PoliceSystem />, document.getElementById('root'));
     </script>
 </body>
 </html>
